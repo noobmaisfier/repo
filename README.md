@@ -23,6 +23,7 @@ sudo pacman -Syu swayfs
 | Package | Source | Description |
 | --- | --- | --- |
 | `swayfs` | [noobmaisfier/swayfs](https://github.com/noobmaisfier/swayfs) | SwayFX fork focused on low RAM/CPU usage |
+| `kumi` | [noobmaisfier/A28](https://github.com/noobmaisfier/A28) | Wayland desktop shell (`kumi`, `kumi-lockscreen`, `kumizo`) |
 
 ## Publishing packages
 
