@@ -1,0 +1,68 @@
+name: publish-pkg
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Public GitHub repo (e.g. noobmaisfier/swayfs)'
+        required: false
+      ref:
+        description: 'Branch or tag to build (default: main)'
+        required: false
+        default: 'main'
+      pkgbuild_dir:
+        description: 'Directory containing PKGBUILD inside source_repo'
+        required: false
+        default: '.'
+      pkg_url:
+        description: 'Or direct URL to an existing .pkg.tar.zst package'
+        required: false
+      extra_deps:
+        description: 'Optional extra pacman packages to preinstall before makepkg'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish-arch:
+    name: Build and publish to x86_64 pacman repo
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain and GitHub CLI
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git github-cli curl libarchive
+          if [ -n "${{ github.event.inputs.extra_deps }}" ]; then
+            pacman -S --noconfirm --needed ${{ github.event.inputs.extra_deps }}
+          fi
+
+      - name: Prepare package(s)
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/built"
+          if [ -n "${{ github.event.inputs.pkg_url }}" ]; then
+            fname="$(basename "${{ github.event.inputs.pkg_url }}")"
+            curl -fsSL -o "$GITHUB_WORKSPACE/built/$fname" "${{ github.event.inputs.pkg_url }}"
+          elif [ -n "${{ github.event.inputs.source_repo }}" ]; then
+            git clone --depth 1 --branch "${{ github.event.inputs.ref }}" \
+              "https://github.com/${{ github.event.inputs.source_repo }}.git" /tmp/src-repo
+            useradd -m -s /bin/bash builder
+            echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+            chown -R builder:builder /tmp/src-repo "$GITHUB_WORKSPACE/built"
+            su - builder -c "cd '/tmp/src-repo/${{ github.event.inputs.pkgbuild_dir }}' && PKGDEST='$GITHUB_WORKSPACE/built' makepkg -s --noconfirm"
+            rm -f "$GITHUB_WORKSPACE/built/"*-debug-*.pkg.tar.zst
+          else
+            echo "Provide either source_repo or pkg_url" >&2
+            exit 1
+          fi
+          ls -la "$GITHUB_WORKSPACE/built"
+
+      - name: Update pacman repo database and upload release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x scripts/publish-pkg.sh
+          REPO="${GITHUB_REPOSITORY}" TAG="x86_64" DB_NAME="noobmaisfier" \
+            ./scripts/publish-pkg.sh "$GITHUB_WORKSPACE/built/"*.pkg.tar.zst
