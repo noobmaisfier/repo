@@ -1,0 +1,66 @@
+name: sync-releases
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  push:
+    branches: [main]
+    paths: ['repos.txt']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync latest release packages into x86_64 repo
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed base-devel github-cli curl jq libarchive
+
+      - name: Sync missing packages from repos.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/sync"
+          existing="$(gh release view x86_64 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+          new_pkgs=()
+
+          while IFS= read -r repo; do
+            repo="${repo%%#*}"
+            repo="$(echo "$repo" | xargs)"
+            [ -n "$repo" ] || continue
+
+            echo "Checking latest release for $repo..."
+            json="$(gh release view --repo "$repo" --json assets 2>/dev/null || true)"
+            [ -n "$json" ] || { echo "  no release found, skipping"; continue; }
+
+            while IFS=$'\t' read -r name url; do
+              [ -n "$name" ] || continue
+              case "$name" in
+                *-debug-*.pkg.tar.zst) continue ;;
+                *-x86_64.pkg.tar.zst|*-any.pkg.tar.zst) ;;
+                *) continue ;;
+              esac
+              if echo "$existing" | grep -Fxq "$name"; then
+                echo "  up to date: $name"
+              else
+                echo "  downloading new asset: $name"
+                curl -fsSL -o "$GITHUB_WORKSPACE/sync/$name" "$url"
+                new_pkgs+=("$GITHUB_WORKSPACE/sync/$name")
+              fi
+            done < <(echo "$json" | jq -r '.assets[] | [.name, .url] | @tsv')
+          done < repos.txt
+
+          if [ "${#new_pkgs[@]}" -eq 0 ]; then
+            echo "All packages in noobmaisfier/repo are already up to date."
+            exit 0
+          fi
+
+          chmod +x scripts/publish-pkg.sh
+          REPO="$GITHUB_REPOSITORY" TAG="x86_64" DB_NAME="noobmaisfier" \
+            ./scripts/publish-pkg.sh "${new_pkgs[@]}"

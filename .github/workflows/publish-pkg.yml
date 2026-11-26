@@ -20,6 +20,8 @@ on:
       extra_deps:
         description: 'Optional extra pacman packages to preinstall before makepkg'
         required: false
+  repository_dispatch:
+    types: [publish-pkg]
 
 permissions:
   contents: write
@@ -29,29 +31,36 @@ jobs:
     name: Build and publish to x86_64 pacman repo
     runs-on: ubuntu-latest
     container: archlinux:latest
+    env:
+      INPUT_SOURCE_REPO: ${{ github.event.inputs.source_repo || github.event.client_payload.source_repo }}
+      INPUT_REF: ${{ github.event.inputs.ref || github.event.client_payload.ref || 'main' }}
+      INPUT_PKGBUILD_DIR: ${{ github.event.inputs.pkgbuild_dir || github.event.client_payload.pkgbuild_dir || '.' }}
+      INPUT_PKG_URL: ${{ github.event.inputs.pkg_url || github.event.client_payload.pkg_url }}
+      INPUT_EXTRA_DEPS: ${{ github.event.inputs.extra_deps || github.event.client_payload.extra_deps }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install toolchain and GitHub CLI
         run: |
           pacman -Syu --noconfirm --needed base-devel git github-cli curl libarchive
-          if [ -n "${{ github.event.inputs.extra_deps }}" ]; then
-            pacman -S --noconfirm --needed ${{ github.event.inputs.extra_deps }}
+          if [ -n "$INPUT_EXTRA_DEPS" ]; then
+            # shellcheck disable=SC2086
+            pacman -S --noconfirm --needed $INPUT_EXTRA_DEPS
           fi
 
       - name: Prepare package(s)
         run: |
           mkdir -p "$GITHUB_WORKSPACE/built"
-          if [ -n "${{ github.event.inputs.pkg_url }}" ]; then
-            fname="$(basename "${{ github.event.inputs.pkg_url }}")"
-            curl -fsSL -o "$GITHUB_WORKSPACE/built/$fname" "${{ github.event.inputs.pkg_url }}"
-          elif [ -n "${{ github.event.inputs.source_repo }}" ]; then
-            git clone --depth 1 --branch "${{ github.event.inputs.ref }}" \
-              "https://github.com/${{ github.event.inputs.source_repo }}.git" /tmp/src-repo
+          if [ -n "$INPUT_PKG_URL" ]; then
+            fname="$(basename "$INPUT_PKG_URL")"
+            curl -fsSL -o "$GITHUB_WORKSPACE/built/$fname" "$INPUT_PKG_URL"
+          elif [ -n "$INPUT_SOURCE_REPO" ]; then
+            git clone --depth 1 --branch "$INPUT_REF" \
+              "https://github.com/${INPUT_SOURCE_REPO}.git" /tmp/src-repo
             useradd -m -s /bin/bash builder
             echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
             chown -R builder:builder /tmp/src-repo "$GITHUB_WORKSPACE/built"
-            su - builder -c "cd '/tmp/src-repo/${{ github.event.inputs.pkgbuild_dir }}' && PKGDEST='$GITHUB_WORKSPACE/built' makepkg -s --noconfirm"
+            su - builder -c "cd '/tmp/src-repo/$INPUT_PKGBUILD_DIR' && PKGDEST='$GITHUB_WORKSPACE/built' makepkg -s --noconfirm"
             rm -f "$GITHUB_WORKSPACE/built/"*-debug-*.pkg.tar.zst
           else
             echo "Provide either source_repo or pkg_url" >&2

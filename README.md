@@ -27,7 +27,12 @@ sudo pacman -Syu swayfs
 
 ## Publishing packages
 
-### 1. From any public GitHub repository (GitHub Actions)
+### 1. Automatic sync from GitHub Releases
+
+- [`sync-releases.yml`](.github/workflows/sync-releases.yml) automatically checks the repositories listed in [`repos.txt`](repos.txt) every 6 hours (and on changes to `repos.txt`) and imports any newly published `*-x86_64.pkg.tar.zst` GitHub Release assets without needing extra tokens.
+- For instant publishing right when a tag is pushed in a source repo (such as `noobmaisfier/kumi` or `noobmaisfier/swayfs`), add a fine-grained PAT (`Contents: Read and write` on `noobmaisfier/repo`) as secret `REPO_DISPATCH_TOKEN` in the source repository: its `release.yml` workflow dispatches `publish-pkg` immediately.
+
+### 2. Manual trigger via GitHub Actions
 
 Run the [`publish-pkg.yml`](.github/workflows/publish-pkg.yml) workflow either from the **Actions** tab or with `gh`:
 
@@ -43,7 +48,7 @@ gh workflow run publish-pkg.yml -R noobmaisfier/repo \
   -f pkg_url=https://github.com/noobmaisfier/swayfs/releases/download/v0.6.swayfs.5/swayfs-0.6.swayfs.5-1-x86_64.pkg.tar.zst
 ```
 
-### 2. From a local build (private repos or quick uploads)
+### 3. From a local build (private repos or quick uploads)
 
 Requires `pacman` (`repo-add`), `bsdtar`, and `gh` authenticated as `noobmaisfier`:
 
